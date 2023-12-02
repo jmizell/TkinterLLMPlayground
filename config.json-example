@@ -1,0 +1,18 @@
+{
+  "models": [
+    {
+      "api_type": "openai_completions",
+      "name": "TheBloke/CodeLlama-34B-Instruct-AWQ",
+      "api_key": "n/a",
+      "api_url": "http://127.0.0.1:8123/v1/completions",
+      "example_template": "[INST] Write code to solve the following coding problem that obeys the constraints and passes the example test cases. Please wrap your code answer using ```:\n{prompt}\n[/INST]"
+    },
+    {
+      "api_type": "llamacpp_completions",
+      "name": "TheBloke/dolphin-2.2.1-mistral-7B-GGUF",
+      "api_key": "n/a",
+      "api_url": "http://127.0.0.1:8126/completion",
+      "example_template": "<|im_start|>system\n{system_message}<|im_end|>\n<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
+    }
+  ]
+}

@@ -2,12 +2,13 @@
 I know it's ugly, that's the point.
 ## Description
 
-This Python application offers a straightforward and simple gui for accessing completions 
-APIs compatible with OpenAI or LlamaCpp. Leveraging Tkinter, which is included in all 
-Python distributions, it provides an easy-to-use environment with minimal learning curve. 
-The application is designed with simplicity in mind, ensuring accessibility for users of 
-varying technical backgrounds. The only external dependency required is the `requests` 
-library, emphasizing the tool's lightweight and straightforward nature.
+This Python application utilizes Tkinter, included in standard Python distributions, 
+to provide a basic but functional interface for interacting with language model APIs 
+compatible with OpenAI and LlamaCpp. The design focuses on simplicity and 
+user-friendliness, catering to users with varying levels of technical expertise. There
+are no dependencies outside the standard lib. It's primarily intended as a practical 
+tool for exploring and testing various open source language models that operate with 
+OpenAI or Llama-CPP compatible APIs.
 
 ## Configuration
 
@@ -26,7 +27,8 @@ must be called `config.json`.
       "api_key": "api_key_here",
       "api_url": "http://model.api.url",
       "example_template": "template_string",
-      "stop_string": "optional_stop_string"
+      "stop_string": "optional_stop_string",
+      "disabled": false
     },
     // Add more models as needed
   ]
@@ -35,12 +37,13 @@ must be called `config.json`.
 
 #### Each model entry must specify:
 
-* **api_type**: The type of the API, e.g., openai_completions or llamacpp_completions.
+* **api_type**: The type of the API, e.g., openai_chat, openai_completions or llamacpp_completions.
 * **name**: A unique name for the model.
 * **api_key**: The API key for authentication (if required).
 * **api_url**: The URL endpoint for the model's API.
 * **example_template**: A template string to pre-populate the input field.
 * **stop_string** (optional): A string that, when detected in the output, signals the model to stop generating further text.
+* **disabled** (optional): A boolean that disables the model at load time.
 
 #### Configuring the Application
 
@@ -50,15 +53,6 @@ the path when running the application.
 
 ## Usage
 
-### Requirements
-
-Insure requests is installed.
-
-```bash
-pip3 install requests
-```
-
-### Running
 Start the Application: Run the application by executing the main script. If you have a 
 specific configuration file, pass its path as an argument. The configuration file
 must be called `config.json`.

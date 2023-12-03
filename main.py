@@ -1,9 +1,11 @@
+import json
 import datetime
+import threading
+import argparse
+from urllib import request
+from urllib.error import URLError
 import tkinter as tk
 from tkinter import ttk
-import requests
-import json
-import threading
 from typing import Iterable, Dict
 
 
@@ -44,25 +46,65 @@ class ModelBase:
         self.stop_requested = False
         self.stop_string = stop_string
 
-    def stream(self, prompt: str, max_tokens: int = 100, temperature: float = 0) -> Iterable[str]:
-        pass
+    def stream(self, prompt: str, max_tokens: int = 100, temperature: float = 0, frequency_penalty: float = 0,
+               presence_penalty: float = 0, top_p: float = 1, top_k: int = 40) -> Iterable[str]:
+        """
+        Streams the output of the model for a given prompt in real-time.
 
-    def stream_with_callback(self, prompt, callback, done, max_tokens: int = 100, temperature: float = 0):
+        Args:
+            prompt (str): The input prompt for the model.
+            max_tokens (int, optional): The maximum number of tokens to generate. Defaults to 100.
+            temperature (float, optional): Controls randomness in the generation. Lower values make the model more
+                                           deterministic. Defaults to 0.
+            frequency_penalty (float, optional): Decreases the likelihood of repeating tokens. Defaults to 0.
+            presence_penalty (float, optional): Encourages the model to introduce new tokens. Defaults to 0.
+            top_p (float, optional): Nucleus sampling: selects the smallest possible set of tokens whose cumulative
+                                     probability exceeds the value of top_p. Defaults to 1.
+            top_k (int, optional): Truncates the set of tokens considered for generation to the top k tokens. Defaults
+                                   to 40.
+
+        Returns:
+            Iterable[str]: An iterable of the generated tokens.
+
+        Raises:
+            Exception: If the stream method is unimplemented in the derived class.
+        """
+        raise Exception("stream method is unimplemented in ModelBase")
+
+    def stream_with_callback(self, prompt, callback, done, max_tokens: int = 100, temperature: float = 0,
+                             frequency_penalty: float = 0, presence_penalty: float = 0, top_p: float = 1,
+                             top_k: int = 40):
         """
         Initiates streaming with a callback function for each completion and a done function after completion.
 
         Args:
             prompt (str): The input prompt for the model.
-            callback (function): A callback function that will be called with each completion.
-            done (function): A function that will be called when streaming is done.
+            callback (callable): A callback function that will be called with each completion.
+            done (callable): A function that will be called when streaming is completed.
             max_tokens (int, optional): The maximum number of tokens to generate. Defaults to 100.
             temperature (float, optional): Controls randomness in the generation. Defaults to 0.
+            frequency_penalty (float, optional): Decreases the likelihood of repeating tokens. Defaults to 0.
+            presence_penalty (float, optional): Encourages the model to introduce new tokens. Defaults to 0.
+            top_p (float, optional): Nucleus sampling: selects the smallest possible set of tokens whose cumulative
+                                     probability exceeds the value of top_p. Defaults to 1.
+            top_k (int, optional): Truncates the set of tokens considered for generation to the top k tokens.
+                                   Defaults to 40.
+
+        This function streams the output of the model to the given callback function, allowing for real-time processing
+        of the generated text.
         """
-        self.stop_requested = False  # Reset the flag
+        self._output_to_callback(
+            self.stream(prompt, max_tokens, temperature, frequency_penalty, presence_penalty, top_p, top_k),
+            callback,
+            done,
+        )
+
+    def _output_to_callback(self, stream: Iterable[str], callback, done):
+        self.stop_requested = False
 
         def stream_thread():
             buffer = []
-            for completion in self.stream(prompt, max_tokens, temperature):
+            for completion in stream:
 
                 if self.stop_requested:
                     break
@@ -102,40 +144,68 @@ class ModelLlamaCpp(ModelBase):
     It supports streaming with callbacks and can be controlled to start and stop the stream as needed.
     """
 
-    def stream(self, prompt: str, max_tokens: int = 100, temperature: float = 0) -> Iterable[str]:
+    def stream(self, prompt: str, max_tokens: int = 100, temperature: float = 0, frequency_penalty: float = 0,
+               presence_penalty: float = 0, top_p: float = 1, top_k: int = 40) -> Iterable[str]:
         """
-        Streams the response from the model based on the given prompt.
+        Streams the output of the model for a given prompt in real-time.
 
         Args:
             prompt (str): The input prompt for the model.
             max_tokens (int, optional): The maximum number of tokens to generate. Defaults to 100.
-            temperature (float, optional): Controls randomness in the generation. Defaults to 0.
+            temperature (float, optional): Controls randomness in the generation. Lower values make the model more
+                                           deterministic. Defaults to 0.
+            frequency_penalty (float, optional): Decreases the likelihood of repeating tokens. Defaults to 0.
+            presence_penalty (float, optional): Encourages the model to introduce new tokens. Defaults to 0.
+            top_p (float, optional): Nucleus sampling: selects the smallest possible set of tokens whose cumulative
+                                     probability exceeds the value of top_p. Defaults to 1.
+            top_k (int, optional): Truncates the set of tokens considered for generation to the top k tokens. Defaults
+                                   to 40.
 
-        Yields:
-            Iterable[str]: An iterable of the model's text completions.
+        Returns:
+            Iterable[str]: An iterable of the generated tokens.
+
+        Raises:
+            Exception: If the stream method is unimplemented in the derived class.
         """
         headers = {
             'Content-Type': 'application/json',
         }
-        data = {
-            'model': self.name, 'prompt': prompt, 'n_predict': max_tokens,
+        data = json.dumps({
+            'model': self.name, 'prompt': prompt, 'n_predict': max_tokens, 'frequency_penalty': frequency_penalty,
+            'presence_penalty': presence_penalty, 'top_p': top_p, 'top_k': top_k,
             'temperature': temperature, 'stream': True
-        }
-        response = requests.post(self.api_url, headers=headers, data=json.dumps(data), stream=True)
-        for line in response.iter_lines():
-            print(line)
-            # Check if the line is not empty and not the end-of-stream marker
-            if line and not line.startswith(b'data: [DONE]'):
-                decoded_line = line.decode('utf-8')
+        }).encode()
+        print(data)
+        try:
+            req = request.Request(self.api_url, data=data, headers=headers, method='POST')
+            with request.urlopen(req) as response:
+                for line in response:
+                    print(line)
+                    # Check if the line is not empty and not the end-of-stream marker
+                    if not line:
+                        continue
 
-                # The line starts with "data: ", so remove that part to get the JSON
-                json_data = json.loads(decoded_line[6:])  # Skipping the first 6 characters "data: "
+                    decoded_line = line.decode('utf-8')
 
-                if 'content' in json_data:
-                    # Extract and yield the text from the first choice
-                    text = json_data['content']
-                    if text:
-                        yield text
+                    if line.startswith(b'data: [DONE]'):
+                        continue
+
+                    if line.startswith(b'data: '):
+
+                        # The line starts with "data: ", so remove that part to get the JSON
+                        json_data = json.loads(decoded_line[6:])  # Skipping the first 6 characters "data: "
+
+                        if 'content' in json_data:
+                            # Extract and yield the text from the first choice
+                            text = json_data['content']
+                            if text:
+                                yield text
+        except URLError as e:
+            yield f"Error: Unable to connect to the server. {e}"
+        except json.JSONDecodeError:
+            yield "Error: Failed to parse the response from the server."
+        except Exception as e:
+            yield f"An unexpected error occurred: {e}"
 
 
 class ModelOpenAI(ModelBase):
@@ -143,40 +213,114 @@ class ModelOpenAI(ModelBase):
     A class representing the OpenAI model for generating text completions.
     """
 
-    def stream(self, prompt: str, max_tokens: int = 100, temperature: float = 0) -> Iterable[str]:
+    def stream(self, prompt: str, max_tokens: int = 100, temperature: float = 0, frequency_penalty: float = 0,
+               presence_penalty: float = 0, top_p: float = 1, top_k: int = 40) -> Iterable[str]:
         """
-        Streams the response from the model based on the given prompt.
+        Streams the output of the model for a given prompt in real-time.
 
         Args:
             prompt (str): The input prompt for the model.
             max_tokens (int, optional): The maximum number of tokens to generate. Defaults to 100.
-            temperature (float, optional): Controls randomness in the generation. Defaults to 0.
+            temperature (float, optional): Controls randomness in the generation. Lower values make the model more
+                                           deterministic. Defaults to 0.
+            frequency_penalty (float, optional): Decreases the likelihood of repeating tokens. Defaults to 0.
+            presence_penalty (float, optional): Encourages the model to introduce new tokens. Defaults to 0.
+            top_p (float, optional): Nucleus sampling: selects the smallest possible set of tokens whose cumulative
+                                     probability exceeds the value of top_p. Defaults to 1.
+            top_k (int, optional): Truncates the set of tokens considered for generation to the top k tokens. Defaults
+                                   to 40.
 
-        Yields:
-            Iterable[str]: An iterable of the model's text completions.
+        Returns:
+            Iterable[str]: An iterable of the generated tokens.
+
+        Raises:
+            Exception: If the stream method is unimplemented in the derived class.
         """
         headers = {
             'Content-Type': 'application/json', 'Authorization': f'Bearer {self.api_key}'
         }
-        data = {
-            'model': self.name, 'prompt': prompt, 'max_tokens': max_tokens,
+        data = json.dumps({
+            'model': self.name, 'prompt': prompt, 'n_predict': max_tokens, 'frequency_penalty': frequency_penalty,
+            'presence_penalty': presence_penalty, 'top_p': top_p, 'top_k': top_k,
             'temperature': temperature, 'stream': True
+        }).encode()
+        print(data)
+        return self._stream(headers, data)
+
+    def _stream(self, headers: dict, data: bytes) -> Iterable[str]:
+        try:
+            req = request.Request(self.api_url, data=data, headers=headers, method='POST')
+            with request.urlopen(req) as response:
+                for line in response:
+                    print(line)
+                    # Check if the line is not empty and not the end-of-stream marker
+                    if not line:
+                        continue
+
+                    decoded_line = line.decode('utf-8')
+
+                    if line.startswith(b'data: [DONE]'):
+                        continue
+
+                    if line.startswith(b'data: '):
+                        # The line starts with "data: ", so remove that part to get the JSON
+                        json_data = json.loads(decoded_line[6:])  # Skipping the first 6 characters "data: "
+
+                        if 'choices' in json_data and len(json_data['choices']) > 0:
+                            # Extract and yield the text from the first choice
+                            text = json_data['choices'][0].get('text', '')
+                            if text:
+                                yield text
+                            delta = json_data['choices'][0].get('delta', '')
+                            if delta and 'content' in delta:
+                                yield delta['content']
+        except URLError as e:
+            yield f"Error: Unable to connect to the server. {e}"
+        except json.JSONDecodeError:
+            yield "Error: Failed to parse the response from the server."
+        except Exception as e:
+            yield f"An unexpected error occurred: {e}"
+
+
+class ModelOpenAIChat(ModelOpenAI):
+    """
+    A class representing the OpenAI chat model for generating text completions.
+    """
+
+    def stream(self, prompt: str, max_tokens: int = 100, temperature: float = 0, frequency_penalty: float = 0,
+               presence_penalty: float = 0, top_p: float = 1, top_k: int = 40) -> Iterable[str]:
+        """
+        Streams the output of the model for a given prompt in real-time.
+
+        Args:
+            prompt (str): The input prompt for the model.
+            max_tokens (int, optional): The maximum number of tokens to generate. Defaults to 100.
+            temperature (float, optional): Controls randomness in the generation. Lower values make the model more
+                                           deterministic. Defaults to 0.
+            frequency_penalty (float, optional): Decreases the likelihood of repeating tokens. Defaults to 0.
+            presence_penalty (float, optional): Encourages the model to introduce new tokens. Defaults to 0.
+            top_p (float, optional): Nucleus sampling: selects the smallest possible set of tokens whose cumulative
+                                     probability exceeds the value of top_p. Defaults to 1.
+            top_k (int, optional): Truncates the set of tokens considered for generation to the top k tokens. Defaults
+                                   to 40.
+
+        Returns:
+            Iterable[str]: An iterable of the generated tokens.
+
+        Raises:
+            Exception: If the stream method is unimplemented in the derived class.
+        """
+        headers = {
+            'Content-Type': 'application/json', 'Authorization': f'Bearer {self.api_key}'
         }
-        response = requests.post(self.api_url, headers=headers, data=json.dumps(data), stream=True)
-        for line in response.iter_lines():
-            print(line)
-            # Check if the line is not empty and not the end-of-stream marker
-            if line and not line.startswith(b'data: [DONE]'):
-                decoded_line = line.decode('utf-8')
-
-                # The line starts with "data: ", so remove that part to get the JSON
-                json_data = json.loads(decoded_line[6:])  # Skipping the first 6 characters "data: "
-
-                if 'choices' in json_data and len(json_data['choices']) > 0:
-                    # Extract and yield the text from the first choice
-                    text = json_data['choices'][0].get('text', '')
-                    if text:
-                        yield text
+        data = json.dumps({
+            'model': self.name, 'n_predict': max_tokens, 'frequency_penalty': frequency_penalty,
+            'presence_penalty': presence_penalty, 'top_p': top_p, 'top_k': top_k,
+            'temperature': temperature, 'stream': True,
+            'messages': [{"role": "user", "content": prompt}],
+        }).encode()
+        print(data)
+        return self._stream(headers, data)
 
 
 def select_all(event):
@@ -204,7 +348,12 @@ def load_config(file_path: str) -> Dict[str, ModelOpenAI]:
     if 'models' not in cfg:
         raise ValueError("No models in config.")
 
-    def create_model(model_config):
+    models = {}
+    for model_config in cfg['models']:
+
+        if model_config.get('disabled', False):
+            continue
+
         if 'name' not in model_config:
             raise ValueError("Model missing name.")
         if 'api_key' not in model_config:
@@ -212,16 +361,25 @@ def load_config(file_path: str) -> Dict[str, ModelOpenAI]:
         if 'api_url' not in model_config:
             raise ValueError(f"Model {model_config['name']} missing api_url.")
 
-        if 'api_type' in model_config and model_config['api_type'] == "llamacpp_completions":
-            return ModelLlamaCpp(
+        api_type = model_config.get('api_type', 'default')
+        if api_type == "llamacpp_completions":
+            models[model_config['name']] = ModelLlamaCpp(
                 name=model_config['name'],
                 api_key=model_config['api_key'],
                 api_url=model_config['api_url'],
                 example_template=model_config.get('example_template', ""),
                 stop_string=model_config.get('stop_string', ""),
             )
-        else:
-            return ModelOpenAI(
+        elif api_type == "openai_completions" or api_type == 'default':
+            models[model_config['name']] = ModelOpenAI(
+                name=model_config['name'],
+                api_key=model_config['api_key'],
+                api_url=model_config['api_url'],
+                example_template=model_config.get('example_template', ""),
+                stop_string=model_config.get('stop_string', ""),
+            )
+        elif api_type == "openai_chat":
+            models[model_config['name']] = ModelOpenAIChat(
                 name=model_config['name'],
                 api_key=model_config['api_key'],
                 api_url=model_config['api_url'],
@@ -229,7 +387,7 @@ def load_config(file_path: str) -> Dict[str, ModelOpenAI]:
                 stop_string=model_config.get('stop_string', ""),
             )
 
-    return {model_config['name']: create_model(model_config) for model_config in cfg['models']}
+    return models
 
 
 class App:
@@ -283,6 +441,7 @@ class App:
         # Configure tags for colors
         self.chat_history.tag_config('ai', foreground='black')
         self.chat_history.tag_config('user', foreground='RoyalBlue')
+        self.chat_history.tag_config('error', foreground='red')
 
         # Scrollbar for chat history
         scrollbar = tk.Scrollbar(chat_frame, command=self.chat_history.yview)
@@ -325,21 +484,49 @@ class App:
             self.model_combobox.set(next(iter(self.models)))
         self.on_model_change()
 
-        # Configuration fields for the rest of the entries
-        self.config_entries = {}
-
-        for label, default_value in self.config_fields.items():
-            frame = tk.Frame(right_sidebar)
-            frame.pack(fill='x', pady=2)
-            tk.Label(frame, text=label).pack(side='left')
-
-            # Create Entry widget with default value
-            entry = tk.Entry(frame)
-            entry.pack(side='right', fill='x', expand=True)
-            entry.insert(0, str(default_value))  # Insert default value
-
-            # Store the Entry widget in the dictionary
-            self.config_entries[label] = entry
+        # Config Values
+        # cfg temperature
+        cfg_temperature = tk.Frame(right_sidebar)
+        cfg_temperature.pack(fill='x', pady=2)
+        tk.Label(cfg_temperature, text="temperature").pack(side='left')
+        self.cfg_temperature = tk.Entry(cfg_temperature)
+        self.cfg_temperature.pack(side='right', fill='x', expand=True)
+        self.cfg_temperature.insert(0, "0.7")
+        # cfg max_tokens
+        cfg_max_tokens = tk.Frame(right_sidebar)
+        cfg_max_tokens.pack(fill='x', pady=2)
+        tk.Label(cfg_max_tokens, text="max_tokens").pack(side='left')
+        self.cfg_max_tokens = tk.Entry(cfg_max_tokens)
+        self.cfg_max_tokens.pack(side='right', fill='x', expand=True)
+        self.cfg_max_tokens.insert(0, "1024")
+        # cfg frequency_penalty
+        cfg_frequency_penalty = tk.Frame(right_sidebar)
+        cfg_frequency_penalty.pack(fill='x', pady=2)
+        tk.Label(cfg_frequency_penalty, text="frequency_penalty").pack(side='left')
+        self.cfg_frequency_penalty = tk.Entry(cfg_frequency_penalty)
+        self.cfg_frequency_penalty.pack(side='right', fill='x', expand=True)
+        self.cfg_frequency_penalty.insert(0, "0")
+        # cfg presence_penalty
+        cfg_presence_penalty = tk.Frame(right_sidebar)
+        cfg_presence_penalty.pack(fill='x', pady=2)
+        tk.Label(cfg_presence_penalty, text="presence_penalty").pack(side='left')
+        self.cfg_presence_penalty = tk.Entry(cfg_presence_penalty)
+        self.cfg_presence_penalty.pack(side='right', fill='x', expand=True)
+        self.cfg_presence_penalty.insert(0, "0")
+        # cfg top_p
+        cfg_top_p = tk.Frame(right_sidebar)
+        cfg_top_p.pack(fill='x', pady=2)
+        tk.Label(cfg_top_p, text="top_p").pack(side='left')
+        self.cfg_top_p = tk.Entry(cfg_top_p)
+        self.cfg_top_p.pack(side='right', fill='x', expand=True)
+        self.cfg_top_p.insert(0, "1")
+        # cfg top_k
+        cfg_top_k = tk.Frame(right_sidebar)
+        cfg_top_k.pack(fill='x', pady=2)
+        tk.Label(cfg_top_k, text="top_k").pack(side='left')
+        self.cfg_top_k = tk.Entry(cfg_top_k)
+        self.cfg_top_k.pack(side='right', fill='x', expand=True)
+        self.cfg_top_k.insert(0, "40")
 
         # Submit button within the right sidebar
         self.submit_button = tk.Button(right_sidebar, text="Send", width='12', height=2, bg='#FFFFFF', bd=0,
@@ -348,7 +535,7 @@ class App:
 
         # Clear chat history button within the right sidebar
         self.clear_chat_button = tk.Button(right_sidebar, text="Clear Chat", width='12', height=2, bg='#FFFFFF', bd=0,
-                                      command=self.clear_chat_history)
+                                           command=self.clear_chat_history)
         self.clear_chat_button.pack(side='top', pady=10)  # Place the button under the submit button
 
         self.stop_button = tk.Button(right_sidebar, text="Stop", width='12', height=2, bg='#FFFFFF', bd=0,
@@ -393,6 +580,8 @@ class App:
         """
         # Update the button states on completion
         self.update_button_states(submit_enabled=True, stop_enabled=False, clear_enabled=True)
+        self.chat_history.config(state='disabled')
+        self.chat_history.see('end')
 
     def on_stop(self):
         """
@@ -425,6 +614,25 @@ class App:
             # If the thread has stopped, update the GUI as needed
             self.update_chat_history_complete()
 
+    def parse_config_value(self, field, field_name, default, parse_func):
+        """
+        Parses a configuration value from the GUI field.
+
+        Args:
+            field (tk.Entry): The GUI field to get the value from.
+            field_name (str): The name of the field for error messages.
+            default: The default value to return in case of a parsing error.
+            parse_func: The function to parse the value (e.g., int, float).
+
+        Returns:
+            Parsed value or default value if parsing fails.
+        """
+        try:
+            return parse_func(field.get())
+        except ValueError as err:
+            self.chat_history.insert('end', f"Error parsing {field_name}: {err}\n", 'error')
+            return default
+
     def on_submit(self, event=None):
         """
         Handles the event when the 'Submit' button is pressed or enter key is pressed.
@@ -438,25 +646,33 @@ class App:
         if user_input.strip():  # Check if input is not just whitespace
             # Disable the input field and submit button
             self.update_button_states(submit_enabled=False, stop_enabled=True, clear_enabled=False)
-
             self.chat_history.config(state='normal')
-            # self.chat_history.insert('end', 'User: ' + user_input + '\n', 'user')
 
-            self.chat_history.insert('end', f"\n\nGeneration started {datetime.datetime.now()}:\n\n", 'user')
-            max_tokens = int(self.config_entries['max_tokens'].get())
-            temperature = float(self.config_entries['temperature'].get())
-            selected_model_name = self.model_combobox.get()
-            model = self.models.get(selected_model_name)
-            model.stream_with_callback(
-                user_input,
-                lambda completion: self.chat_history.after(0, self.update_chat_history, completion),
-                self.update_chat_history_complete,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
-            self.stop_button.config(state='normal')
+            max_tokens = self.parse_config_value(self.cfg_max_tokens, "max_tokens", 100, int)
+            temperature = self.parse_config_value(self.cfg_temperature, "temperature", 0, float)
+            frequency_penalty = self.parse_config_value(self.cfg_frequency_penalty, "frequency_penalty", 0, float)
+            presence_penalty = self.parse_config_value(self.cfg_presence_penalty, "presence_penalty", 0, float)
+            top_p = self.parse_config_value(self.cfg_top_p, "top_p", 1, float)
+            top_k = self.parse_config_value(self.cfg_top_k, "top_k", 40, int)
 
-            # self.input_field.delete("1.0", 'end')  # Clear the Text widget
+            # Only proceed if all values are successfully parsed
+            if all(v is not None for v in [max_tokens, temperature, frequency_penalty, presence_penalty, top_p, top_k]):
+                self.chat_history.insert('end', f"\n\nGeneration started {datetime.datetime.now()}:\n\n", 'user')
+                selected_model_name = self.model_combobox.get()
+                model = self.models.get(selected_model_name)
+                model.stream_with_callback(
+                    user_input,
+                    lambda completion: self.chat_history.after(0, self.update_chat_history, completion),
+                    self.update_chat_history_complete,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    frequency_penalty=frequency_penalty,
+                    presence_penalty=presence_penalty,
+                    top_p=top_p,
+                    top_k=top_k,
+                )
+                self.stop_button.config(state='normal')
+
             self.chat_history.config(state='disabled')
             self.chat_history.see('end')
         return 'break'
@@ -495,4 +711,7 @@ class App:
 
 
 if __name__ == '__main__':
-    App("config.json")
+    parser = argparse.ArgumentParser(description='Start the chatbot application with a specified configuration file.')
+    parser.add_argument('-c', '--config', default='config.json', help='Path to the configuration file.')
+    args = parser.parse_args()
+    App(args.config)

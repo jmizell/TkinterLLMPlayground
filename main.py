@@ -18,20 +18,23 @@ class ModelBase:
         example_template (str): An example template for the model.
         thread (threading.Thread): The thread for streaming data.
         stop_requested (bool): Flag to indicate if streaming should be stopped.
+        stop_string (str): Generation stops when this string is observed.
     """
 
     name: str
     api_key: str
     api_url: str
     example_template: str
+    stop_string: str
 
-    def __init__(self, name: str, api_key: str, api_url: str, example_template: str = ""):
+    def __init__(self, name: str, api_key: str, api_url: str, example_template: str = "", stop_string: str = ""):
         """
         Args:
             name (str): The name of the model.
             api_key (str): The API key for authentication.
             api_url (str): The URL for the API endpoint.
             example_template (str, optional): An example template for the model. Defaults to an empty string.
+            stop_string (str): Generation stops when this string is observed.
         """
         self.thread = None
         self.name = name
@@ -39,6 +42,7 @@ class ModelBase:
         self.api_url = api_url
         self.example_template = example_template
         self.stop_requested = False
+        self.stop_string = stop_string
 
     def stream(self, prompt: str, max_tokens: int = 100, temperature: float = 0) -> Iterable[str]:
         pass
@@ -57,10 +61,33 @@ class ModelBase:
         self.stop_requested = False  # Reset the flag
 
         def stream_thread():
+            buffer = []
             for completion in self.stream(prompt, max_tokens, temperature):
-                if self.stop_requested:  # Check if stop is requested
+
+                if self.stop_requested:
                     break
-                callback(completion)
+
+                if self.stop_string:
+                    for c in completion:
+                        buffer.append(c)
+
+                    if len(buffer) > len(self.stop_string):
+                        # We evaluate a rolling window for the stop word, if we find it, we stop yielding characters.
+                        for i in range(len(buffer) - len(self.stop_string)):
+                            window = "".join(buffer[:len(self.stop_string)])
+                            if window == self.stop_string:
+                                self.stop_requested = True
+                                buffer = []
+                                break
+                            else:
+                                callback(buffer[0])
+                                buffer = buffer[1:]
+                else:
+                    callback(completion)
+
+            if len(buffer) > 0:
+                callback("".join(buffer))
+
             done()
 
         self.thread = threading.Thread(target=stream_thread)
@@ -190,14 +217,16 @@ def load_config(file_path: str) -> Dict[str, ModelOpenAI]:
                 name=model_config['name'],
                 api_key=model_config['api_key'],
                 api_url=model_config['api_url'],
-                example_template=model_config.get('example_template', "")
+                example_template=model_config.get('example_template', ""),
+                stop_string=model_config.get('stop_string', ""),
             )
         else:
             return ModelOpenAI(
                 name=model_config['name'],
                 api_key=model_config['api_key'],
                 api_url=model_config['api_url'],
-                example_template=model_config.get('example_template', "")
+                example_template=model_config.get('example_template', ""),
+                stop_string=model_config.get('stop_string', ""),
             )
 
     return {model_config['name']: create_model(model_config) for model_config in cfg['models']}

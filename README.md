@@ -25,7 +25,8 @@ must be called `config.json`.
       "name": "ModelName1",
       "api_key": "api_key_here",
       "api_url": "http://model.api.url",
-      "example_template": "template_string"
+      "example_template": "template_string",
+      "stop_string": "optional_stop_string"
     },
     // Add more models as needed
   ]
@@ -39,6 +40,7 @@ must be called `config.json`.
 * **api_key**: The API key for authentication (if required).
 * **api_url**: The URL endpoint for the model's API.
 * **example_template**: A template string to pre-populate the input field.
+* **stop_string** (optional): A string that, when detected in the output, signals the model to stop generating further text.
 
 #### Configuring the Application
 

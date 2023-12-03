@@ -7,12 +7,9 @@ import threading
 from typing import Iterable, Dict
 
 
-class ModelLlamaCpp:
+class ModelBase:
     """
-    A class representing the ModelLlamaCpp for generating text completions.
-
-    This class provides methods to stream responses from the LlamaCpp API based on a given prompt.
-    It supports streaming with callbacks and can be controlled to start and stop the stream as needed.
+    A class representing the base model for generating text completions.
 
     Attributes:
         name (str): The name of the model.
@@ -30,8 +27,6 @@ class ModelLlamaCpp:
 
     def __init__(self, name: str, api_key: str, api_url: str, example_template: str = ""):
         """
-        Initializes the ModelLlamaCpp instance.
-
         Args:
             name (str): The name of the model.
             api_key (str): The API key for authentication.
@@ -44,6 +39,41 @@ class ModelLlamaCpp:
         self.api_url = api_url
         self.example_template = example_template
         self.stop_requested = False
+
+    def stream(self, prompt: str, max_tokens: int = 100, temperature: float = 0) -> Iterable[str]:
+        pass
+
+    def stream_with_callback(self, prompt, callback, done, max_tokens: int = 100, temperature: float = 0):
+        """
+        Initiates streaming with a callback function for each completion and a done function after completion.
+
+        Args:
+            prompt (str): The input prompt for the model.
+            callback (function): A callback function that will be called with each completion.
+            done (function): A function that will be called when streaming is done.
+            max_tokens (int, optional): The maximum number of tokens to generate. Defaults to 100.
+            temperature (float, optional): Controls randomness in the generation. Defaults to 0.
+        """
+        self.stop_requested = False  # Reset the flag
+
+        def stream_thread():
+            for completion in self.stream(prompt, max_tokens, temperature):
+                if self.stop_requested:  # Check if stop is requested
+                    break
+                callback(completion)
+            done()
+
+        self.thread = threading.Thread(target=stream_thread)
+        self.thread.start()
+
+
+class ModelLlamaCpp(ModelBase):
+    """
+    A class representing the ModelLlamaCpp for generating text completions.
+
+    This class provides methods to stream responses from the LlamaCpp API based on a given prompt.
+    It supports streaming with callbacks and can be controlled to start and stop the stream as needed.
+    """
 
     def stream(self, prompt: str, max_tokens: int = 100, temperature: float = 0) -> Iterable[str]:
         """
@@ -80,64 +110,11 @@ class ModelLlamaCpp:
                     if text:
                         yield text
 
-    def stream_with_callback(self, prompt, callback, done, max_tokens: int = 100, temperature: float = 0):
-        """
-        Initiates streaming with a callback function for each completion and a done function after completion.
 
-        Args:
-            prompt (str): The input prompt for the model.
-            callback (function): A callback function that will be called with each completion.
-            done (function): A function that will be called when streaming is done.
-            max_tokens (int, optional): The maximum number of tokens to generate. Defaults to 100.
-            temperature (float, optional): Controls randomness in the generation. Defaults to 0.
-        """
-        self.stop_requested = False  # Reset the flag
-
-        def stream_thread():
-            for completion in self.stream(prompt, max_tokens, temperature):
-                if self.stop_requested:  # Check if stop is requested
-                    break
-                callback(completion)
-            done()
-
-        self.thread = threading.Thread(target=stream_thread)
-        self.thread.start()
-
-
-class ModelOpenAI:
+class ModelOpenAI(ModelBase):
     """
     A class representing the OpenAI model for generating text completions.
-
-    Attributes:
-        name (str): The name of the model.
-        api_key (str): The API key for authentication.
-        api_url (str): The URL for the API endpoint.
-        example_template (str): An example template for the model.
-        thread (threading.Thread): The thread for streaming data.
-        stop_requested (bool): Flag to indicate if streaming should be stopped.
     """
-
-    name: str
-    api_key: str
-    api_url: str
-    example_template: str
-
-    def __init__(self, name: str, api_key: str, api_url: str, example_template: str = ""):
-        """
-        Initializes the ModelOpenAI instance.
-
-        Args:
-            name (str): The name of the model.
-            api_key (str): The API key for authentication.
-            api_url (str): The URL for the API endpoint.
-            example_template (str, optional): An example template for the model. Defaults to an empty string.
-        """
-        self.thread = None
-        self.name = name
-        self.api_key = api_key
-        self.api_url = api_url
-        self.example_template = example_template
-        self.stop_requested = False
 
     def stream(self, prompt: str, max_tokens: int = 100, temperature: float = 0) -> Iterable[str]:
         """
@@ -173,29 +150,6 @@ class ModelOpenAI:
                     text = json_data['choices'][0].get('text', '')
                     if text:
                         yield text
-
-    def stream_with_callback(self, prompt, callback, done, max_tokens: int = 100, temperature: float = 0):
-        """
-        Initiates streaming with a callback function for each completion and a done function after completion.
-
-        Args:
-            prompt (str): The input prompt for the model.
-            callback (function): A callback function that will be called with each completion.
-            done (function): A function that will be called when streaming is done.
-            max_tokens (int, optional): The maximum number of tokens to generate. Defaults to 100.
-            temperature (float, optional): Controls randomness in the generation. Defaults to 0.
-        """
-        self.stop_requested = False  # Reset the flag
-
-        def stream_thread():
-            for completion in self.stream(prompt, max_tokens, temperature):
-                if self.stop_requested:  # Check if stop is requested
-                    break
-                callback(completion)
-            done()
-
-        self.thread = threading.Thread(target=stream_thread)
-        self.thread.start()
 
 
 def select_all(event):
